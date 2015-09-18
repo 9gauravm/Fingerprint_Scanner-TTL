@@ -1,7 +1,15 @@
 '''
 Created on 21/03/2014
 
-@author: Jean Machuca <correojean@gmail.com> @jeanmachuca
+@author: 
+
+Created by Jean Machuca <correojean@gmail.com> @jeanmachuca
+
+BeagleBone Black compatability changes by:
+
+James Marcogliese <james.marcogliese@gmail.com>
+Shawn Shamshuddin
+William Clattenburg
 '''
 
 import os
@@ -29,7 +37,7 @@ def serial_ports():
             _serial_ports = []
     else:
         # unix
-        _serial_ports = [port[0] for port in list_ports.comports()]
+        _serial_ports = ["/dev/ttyO2"]
     return _serial_ports
            
 def devices(index=None):
@@ -43,13 +51,13 @@ def devices(index=None):
 if os.name == 'nt':
     DEVICE_NAME = 'COM3'
 else:
-    DEVICE_NAME = '/dev/cu.usbserial-A601EQ14'  #default device to use
+    DEVICE_NAME = '/dev/ttyO2'  #default device to use (Place correct BBb UART port here)
 
-def isFingerPrintConnected(is_com=True):
+def isFingerPrintConnected():
     '''
-        Detect if the fingerprint device is present in the device list, only for com ports
+        Detect if the fingerprint device is present in the device list
     '''
-    return True if (not is_com) or devices().__contains__(DEVICE_NAME) else False
+    return True if devices().__contains__(DEVICE_NAME) else False
 
 
 class Packet:
@@ -271,24 +279,14 @@ class SerialCommander:
         bytearr.append(char_readed)
         return bytearr
 
-def connect(device_name=None,baud=None,timeout=None,is_com=True):
+def connect(baud=None):
     _ser = None
-    if device_name is None:
-        device_name = DEVICE_NAME
-    else:
-        DEVICE_NAME = device_name
     if baud is None:
         baud=9600
-    if timeout is None:
-        timeout = 10000
-    if isFingerPrintConnected(is_com):
-        try:
-            _ser = serial.Serial(device_name,baudrate=baud,timeout=timeout)
-            if not _ser.isOpen():
-                _ser.open()
-        except Exception,e:
-            print '[Connect] No es posible conectar al dispositivo %s' % (str(e))
-            pass
+    if isFingerPrintConnected():
+        _ser = serial.Serial(DEVICE_NAME,baudrate=baud)
+        if not _ser.isOpen():
+            _ser.open()
     return _ser
 
 #BAUD = 115200
@@ -297,35 +295,26 @@ BAUD = 9600
 class FPS_GT511C3(SerialCommander):
     _serial = None
     _lastResponse = None
-    _device_name = None
-    _baud = None
-    _timeout= None
     
     '''
     # Enables verbose debug output using hardware Serial 
     '''
     UseSerialDebug = True
     
-    def __init__(self,device_name=None,baud=None,timeout=None,is_com=True):
+    def __init__(self):
         '''
             Creates a new object to interface with the fingerprint scanner
         '''
-        self._device_name = device_name
-        self._baud=baud
-        self._timeout = timeout
-        self._serial = connect(device_name,baud,timeout,is_com=is_com)
+        self._serial = connect()
         if not self._serial is None:
             delay(0.1)
             self.Open()
-        elif self.UseSerialDebug:
-            print '[FPS_GT511C3] No es posible conectar con el dispositivo %s' % self._device_name
-            
      
     def Open(self):
         '''
             Initialises the device and gets ready for commands
         '''
-        self.ChangeBaudRate(BAUD)
+        #self.ChangeBaudRate(BAUD)
         delay(0.1)
         cp = Command_Packet('Open',UseSerialDebug=self.UseSerialDebug)
         cp.ParameterFromInt(1)
@@ -396,7 +385,7 @@ class FPS_GT511C3(SerialCommander):
                     print 'Changing port baudrate'
                 self._serial.close()
                 BAUD = baud
-                self._serial = connect(self._device_name,self._baud,self._timeout)
+                self._serial = connect(BAUD)
             del rp
             del packetbytes
         return retval
@@ -481,7 +470,7 @@ class FPS_GT511C3(SerialCommander):
         del packetbytes
         rp = self.GetResponse()
         retval = rp.IntFromParameter()
-        retval = 3 if retval < 200 else 0
+        retval = 3 if retval < 20 else 0
         if not rp.ACK:
             if rp.Error == rp.errors['NACK_ENROLL_FAILED']:
                 retval = 1
@@ -505,7 +494,7 @@ class FPS_GT511C3(SerialCommander):
         del packetbytes
         rp = self.GetResponse()
         retval = rp.IntFromParameter()
-        retval = 3 if retval < 200 else 0
+        retval = 3 if retval < 20 else 0
         if not rp.ACK:
             if rp.Error == rp.errors['NACK_ENROLL_FAILED']:
                 retval = 1
@@ -531,7 +520,7 @@ class FPS_GT511C3(SerialCommander):
         del packetbytes
         rp = self.GetResponse()
         retval = rp.IntFromParameter()
-        retval = 3 if retval < 200 else 0
+        retval = 3 if retval < 20 else 0
         if not rp.ACK:
             if rp.Error == rp.errors['NACK_ENROLL_FAILED']:
                 retval = 1
@@ -549,11 +538,13 @@ class FPS_GT511C3(SerialCommander):
         packetbytes = cp.GetPacketBytes()
         self.SendCommand(packetbytes, 12)
         rp = self.GetResponse()
+        retval = False
         pval = rp.ParameterBytes[0]
         pval += rp.ParameterBytes[1]
         pval += rp.ParameterBytes[2]
         pval += rp.ParameterBytes[3]
-        retval = True if pval == 0 else False
+        if (pval == 0):
+            retval = True
         del rp
         del packetbytes
         del cp
@@ -622,16 +613,16 @@ class FPS_GT511C3(SerialCommander):
         '''
              Checks the currently pressed finger against all enrolled fingerprints
              Returns:
-                0-199: Verified against the specified ID (found, and here is the ID number)
-                200: Failed to find the fingerprint in the database
+                0-19: Verified against the specified ID (found, and here is the ID number)
+                20: Failed to find the fingerprint in the database
         '''
         cp = Command_Packet('Identify1_N',UseSerialDebug=self.UseSerialDebug)
         packetbytes = cp.GetPacketBytes()
         self.SendCommand(packetbytes, 12)
         rp = self.GetResponse()
         retval = rp.IntFromParameter()
-        if retval > 200:
-            retval = 200
+        if retval > 20:
+            retval = 20
         del rp
         del packetbytes
         del cp
@@ -760,17 +751,17 @@ class FPS_GT511C3(SerialCommander):
                 print repr(bytes(cmd))[1:-1]
         else:
             if self.UseSerialDebug:
-                print '[SendCommand] No es posible escribir en %s' % self._device_name
+                print 'No es posible escribir en %s' % DEVICE_NAME
     
     def GetResponse(self):
         '''
         Gets the response to the command from the software serial channel (and waits for it)
         '''
-        interval = 0.1
+        interval = 1	#Due to BBb using UART (Asynchronous communication) instead of software serial (For which this lib was orginally created for), a large enough delay is required to accommodate the most time-intensive functions of the fingerprint scanner module. ('Capture finger' and 'enroll 3' take around .6ms to fully complete)
         delay(interval)
         if self._serial is None:
             rp = Response_Packet()
-            print '[GetResponse] No es posible leer desde: %s' % self._device_name
+            print 'No es posible leer desde: %s' % DEVICE_NAME
         else:
             r = bytearray(self._serial.read(self._serial.inWaiting()))
             rp = Response_Packet(r,self.UseSerialDebug)
