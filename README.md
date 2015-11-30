@@ -16,6 +16,6 @@ Repository Contents
 
 =======================
 
-Python code was originally provded by jeanmachuca <correojean@gmail.com>.
+Python code was originally provided by jeanmachuca <correojean@gmail.com>.
 NOTE: Please read the LICENSE.txt before to use the code
 
